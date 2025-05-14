@@ -2,14 +2,12 @@
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 2) {
-  stop("Usage: Rscript script.R <input_dir> <output_folder>")
+  stop("Usage: Rscript script.R <reference.Fasta> <transcript_expression_matrix.csv>")
 }
 
-input_dir <- args[1]
-output_folder <- args[2]
-
-cdna <- file.path(input_dir, "Homo_sapiens.GRCh38.106.cdna.all.clean.fa")
-count_file <- file.path(input_dir, "transcript_expression.csv")
+cdna <- args[1]
+count_file <- args[2]
+output_folder <- "output/"
 
 C_folder <- "simseq_sc/"
 C_compiled_code <- "build/simseq_sc"
