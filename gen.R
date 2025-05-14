@@ -1,16 +1,42 @@
-library(R.utils)
-library("GenomicFeatures")
-library("Biostrings")
-library(ShortRead)
+# Directories and file paths
+args <- commandArgs(trailingOnly = TRUE)
+
+if (length(args) < 2) {
+  stop("Usage: Rscript script.R <input_dir> <output_folder>")
+}
+
+input_dir <- args[1]
+output_folder <- args[2]
+
+cdna <- file.path(input_dir, "Homo_sapiens.GRCh38.106.cdna.all.clean.fa")
+count_file <- file.path(input_dir, "transcript_expression.csv")
 
 C_folder <- "simseq_sc/"
 C_compiled_code <- "build/simseq_sc"
-output_folder <- "output/"
 read_len <- 91
 fragment_mean <- 400
 fragment_std <- 100
 
-flat_file <- function(file_name,is_gz,read_no) {
+
+
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+required_packages <- c("R.utils", "GenomicFeatures", "Biostrings", "ShortRead")
+
+for (pkg in required_packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    BiocManager::install(pkg, ask = FALSE, update = FALSE)
+  }
+  suppressPackageStartupMessages(
+    library(pkg, character.only = TRUE, quietly = TRUE, warn.conflicts = FALSE)
+  )
+}
+
+
+
+flat_file <- function(file_name,is_gz,read_no, output_file_name) {
   con <- if (is_gz) gzfile(file_name, open = "r") else file(file_name, open = "r")
   on.exit(close(con))
   
@@ -60,7 +86,9 @@ flat_file <- function(file_name,is_gz,read_no) {
     } else {
       seq_buffer <- paste0(seq_buffer, gsub("\\s", "", line))
     }
-    print(paste("Read:",idx,"; Barcode_idx:",barcode_idx))
+    
+    if(read_no == 1) print(paste0("Apply barcode and UMI for read: ", idx))
+    else if(read_no == 2) print(paste0("Formatting read ", idx))
   }
   
   if (length(seq_buffer) > 0) {
@@ -72,28 +100,28 @@ flat_file <- function(file_name,is_gz,read_no) {
       output[idx] <- paste0(seq_buffer, collapse = "")
     }
   }
-  writeLines(output, file_name)
+  writeLines(output, output_file_name)
 }
 
-# Directories and file paths
-input_dir = "input/"
-cdna <- "/home/vunguyen/tin_sinh/input/fasta_folder/Homo_sapiens.GRCh38.106.cdna.all.clean.fa"
-count_file <- paste(input_dir,"transcript_expression.csv",sep = "")
 
 # Load transcript sequences
 tx.all.fasta <- readDNAStringSet(cdna)
 all_fasta_name <- names(tx.all.fasta)
 
-# Read transcript expression count
+# preprocessing
+print("!!!Begin preprocessing:")
 read_count <- read.csv(count_file, header = TRUE, row.names = 1)
 # Remove rows where all values are 0
 read_count <- read_count[rowSums(read_count != 0) > 0, ]
 # Remove columns where all values are 0
 read_count <- read_count[, colSums(read_count != 0) > 0]
+print("!!!Preprocessing done!")
 
+# read generating
+print("!!!Begin simulating reads:")
+dir.create(paste0(output_folder))
 dir.create(paste0(output_folder,"/fasta"))
 
-# Simulate reads and generate FASTQ files
 for (i in 1:ncol(read_count)) {
   readmat_input <- as.matrix(read_count[, i, drop = FALSE])
   selected_fasta_file <- paste0(output_folder,"selected_fasta.fa")
@@ -125,30 +153,34 @@ for (i in 1:ncol(read_count)) {
   tx_names <- paste0(x[ m ], "Cell", i, " ", y[ m ])
   names(selected_transcripts) <- tx_names
   writeXStringSet(selected_transcripts, selected_fasta_file)
-  flat_file(selected_fasta_file,0,0)
-  
+  flat_file(selected_fasta_file,0,0, selected_fasta_file)
+
   gzip(selected_fasta_file)
   
   system(paste0("cat ",selected_fasta_file,".gz >> ",output_folder,"/fasta/final_fasta.fa.gz"))
   file.remove(paste0(selected_fasta_file,".gz"))
 
-  print(paste("Cell:",i))
+  print(paste0("Simulating read: Cell ",i, " done!"))
 }
 
 select_fasta_folder <- paste0(output_folder,"/fasta/")
 read_count_file <- paste(output_folder,"/readcount.txt",sep="")
 command <- paste("./",C_folder,C_compiled_code," ",select_fasta_folder, " -o ",output_folder," -b 0 -rc ",read_count_file," -r ",read_len," -fm ",fragment_mean," -fs ",fragment_std,sep = "")
 system(command)
+print("!!!Simulating read done!")
 
-input_fasta <- paste0(output_folder,"final_fasta.fa_sim_1.fasta.gz")
+
+# apply UMI and barcode
+print("!!!Begin apply UMI and barcode for each read:")
 barcode <- colnames(read_count)[i]
-  
-  # Read 1
-  read_1 <- paste(output_folder, "final_fasta.fa_sim_1.fasta.gz", sep = "")
-  output_read1_fasta <- (paste(output_folder, "read1.fasta", sep = ""))
-  flat_file(read_1, 1, 1)
-  
-  # Read 2
-  read_2 <- paste(output_folder, "selected_fasta_sim_1.fasta.gz", sep = "")
-  output_read2_fasta <- (paste(output_folder, "read2.fasta", sep = ""))
-  flat_file(read_2, 1, 0)
+# Read 1
+read_1 <- paste(output_folder, "final_fasta.fa_sim_2.fasta.gz", sep = "")
+output_read1_fasta <- paste(output_folder, "read1.fasta", sep = "")
+flat_file(read_1, 1, 1, output_read1_fasta)
+
+# Read 2
+read_2 <- paste(output_folder, "final_fasta.fa_sim_1.fasta.gz", sep = "")
+output_read2_fasta <- paste(output_folder, "read2.fasta", sep = "")
+flat_file(read_2, 1, 2, output_read2_fasta)
+
+print("!!!Apply UMI and barcode for each read done!")
